@@ -36,18 +36,10 @@ Clarity of the prompt ≠ simplicity of the task. Even with `KNOWN` rules and a 
 - **Progressive 3-Step Escalation (`Luna -> Terra -> Sol`)**: On `gpt-6-luna` capability failure or more than one substantial rework, escalate to `gpt-6.1-terra` (`medium` or `high`) for implementation/engineering tasks, or directly to `gpt-6.2-sol` for design/architectural synthesis; do not spend multiple Luna retries. On `gpt-6.1-terra` capability failure, escalate to `gpt-6.2-sol` (`high` or `xhigh`). Capacity failure on Sol medium/high selects Sol xhigh. If Sol xhigh reaches its capability limit, return evidence to the user/Root for a manual decision. Operational failures do not upgrade the model.
 - Missing essential user information calls for one focused question. Clear task requirements may still imply substantial cognitive work.
 
-## Lightweight telemetry (completion-only, spawned tasks)
+## Zero-token automatic telemetry (Codex Stop hook)
 
-- **Never log at spawn.** Log at most once, at task completion.
-- **Skip telemetry for `root_direct` tasks** (`gpt-6-luna / low` and `medium`) to save a shell turn.
-- Log at completion of every spawned task (`worker` / `strong_worker`) via one best-effort call from `{{ROUTER_DIR}}`:
+- **Do NOT run shell commands to log routing telemetry.** Never invoke `python -m v5_offline.live log` during or after a task; doing so wastes a full Root inference turn.
+- Routing decisions and actual subagent execution metrics (`model`, `reasoning_effort`, `agent_role`, `tokens_used`, elapsed time) are recorded automatically at zero token cost by the Codex `Stop` hook (`{{CODEX_HOME}}/hooks/router_v5_stop_telemetry.py`) reading `state_5.sqlite`.
+- For `phase`, choose only `discovery`, `design`, `implementation`, `verification`, or `cleanup`; execution work belongs to `implementation`.
 
-```powershell
-python -m v5_offline.live log --task-id <unique-id> --family <actual-model> --effort <actual-effort> --mode <worker|strong_worker> --reason <short-code> --outcome <verified_success|verified_failure> --rework <n> --retries <n>
-```
-
-Add `--evidence-file <path>` when independently inspected verification evidence exists; pass optional structural flags (`--scope`, `--uncertainty`, `--failcost`, `--mutation`, `--dependencies`, `--verification`, `--spec-completeness`) when you want the verified outcome to enter active prequential routing history. Telemetry failure must never block task work. No raw prompts are logged.
-
-For `phase`, choose only `discovery`, `design`, `implementation`, `verification`, or `cleanup`; execution work belongs to `implementation`.
-
-Live decisions: `{{CODEX_HOME}}/router_v5_live/live_decisions.jsonl`. Outcomes: `{{CODEX_HOME}}/router_v5_live/outcome_registry.jsonl`. `validate`, `decide`, `observe`, `fallback`, and `audit` remain supported; they are not pre-task gates. Audit at verified task checkpoints 5, 15 and 30 is diagnostic and does not promote/calibrate the policy. Structured history accepts comparable evidence across small task-name/model-version variations, while excluding old GPT-6 Sol, manual routes, operational failures, future evidence and incomplete lightweight structural profiles.
+Live decisions: `{{CODEX_HOME}}/router_v5_live/live_decisions.jsonl`. Outcomes: `{{CODEX_HOME}}/router_v5_live/outcome_registry.jsonl`. The legacy CLI (`validate`, `decide`, `observe`, `fallback`, `audit`) remains supported in `{{ROUTER_DIR}}` for diagnostics and offline audits. Structured history accepts comparable evidence across small task-name/model-version variations, while excluding old GPT-6 Sol, manual routes, operational failures, future evidence and incomplete lightweight structural profiles.

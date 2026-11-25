@@ -35,11 +35,12 @@ bash ./install.sh
 ```
 
 > [!TIP]
-> **Modalità senza telemetria Python (`-NoTelemetry` / `--no-telemetry`)**:
-> Se sull'altro PC non vuoi installare/usare Python per salvare i log in `router_v5_live/`, aggiungi il flag `-NoTelemetry` (Windows) o `--no-telemetry` (macOS/Linux). Il routing dei modelli funzionerà comunque al 100%.
+> **Telemetria automatica a ZERO token (Codex `Stop` hook)**:
+> Il Root **non** esegue mai comandi shell per loggare la telemetria (risparmiando 1 turno completo di inferenza Root per ogni sub-agente). Al termine del turno, l'hook `Stop` (`~/.codex/hooks/router_v5_stop_telemetry.py`) legge automaticamente `state_5.sqlite` in sola lettura e registra modello reale, effort, `tokens_used` e durata in `router_v5_live/`.
+> Se su un PC non hai Python o non vuoi nemmeno la telemetria via hook, aggiungi `-NoTelemetry` (Windows) o `--no-telemetry` (macOS/Linux).
 
 ### Altri flag disponibili
-* `-PolicyOnly` / `--policy-only`: aggiorna `AGENTS.md` e i sub-agenti in `agents/` senza modificare `config.toml`.
+* `-PolicyOnly` / `--policy-only`: aggiorna `AGENTS.md`, i sub-agenti in `agents/` e il `Stop` hook senza modificare `config.toml`.
 * `-CodexHome <percorso>` / `--codex-home <percorso>`: specifica una cartella `.codex` personalizzata.
 
 ---
@@ -47,8 +48,9 @@ bash ./install.sh
 ## Cosa fa l'installer (in modo idempotente)
 
 1. Copia `worker.toml`, `strong-worker.toml` e `reviewer.toml` in `~/.codex/agents/` (rimuovendo eventuale `router.toml` legacy).
-2. Inserisce o aggiorna il blocco `<!-- CODEX-TOKEN-MINIMAL START --> ... <!-- CODEX-TOKEN-MINIMAL END -->` dentro `~/.codex/AGENTS.md` **senza cancellare** altre tue istruzioni personali presenti nel file.
-3. Crea un backup `config.toml.bak` e imposta in `~/.codex/config.toml`:
+2. Installa `~/.codex/hooks/router_v5_stop_telemetry.py` e registra l'hook `Stop` dentro `~/.codex/hooks.json` **preservando intatti eventuali altri hook esistenti** (es. `PreToolUse`).
+3. Inserisce o aggiorna il blocco `<!-- CODEX-TOKEN-MINIMAL START --> ... <!-- CODEX-TOKEN-MINIMAL END -->` dentro `~/.codex/AGENTS.md` **senza cancellare** altre tue istruzioni personali presenti nel file.
+4. Crea un backup `config.toml.bak` e imposta in `~/.codex/config.toml`:
    * `model_provider = "openai"`, `model = "gpt-6-luna"`, `model_reasoning_effort = "medium"`
    * `[features] multi_agent = true`
    * `[agents] default_subagent_model = "gpt-6-luna"` e `default_subagent_reasoning_effort = "medium"`

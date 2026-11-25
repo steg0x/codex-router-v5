@@ -199,11 +199,18 @@ try {
 
     if ($Mode -eq "openai") {
         $codexHome = Join-Path $env:USERPROFILE ".codex"
+        $hooksDir = Join-Path $codexHome "hooks"
+        if (-not (Test-Path $hooksDir)) { New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null }
+        $srcStopHook = Join-Path $scriptDir "config\hooks\router_v5_stop_telemetry.py"
+        if (Test-Path $srcStopHook) {
+            Copy-Item $srcStopHook (Join-Path $hooksDir "router_v5_stop_telemetry.py") -Force
+        }
         $delegationFile = Join-Path $scriptDir "config\$delegationName"
         if (Test-Path $delegationFile) {
             $delegationText = [System.IO.File]::ReadAllText($delegationFile)
             $liveStateDir = (Join-Path $codexHome "router_v5_live") + "\"
-            $delegationText = $delegationText.Replace("{{ROUTER_DIR}}", $scriptDir).Replace("{{CODEX_HOME}}/router_v5_live/", $liveStateDir).Replace("{{CODEX_HOME}}", $codexHome)
+            $hooksDirWin = $hooksDir + "\"
+            $delegationText = $delegationText.Replace("{{ROUTER_DIR}}", $scriptDir).Replace("{{CODEX_HOME}}/router_v5_live/", $liveStateDir).Replace("{{CODEX_HOME}}/hooks/", $hooksDirWin).Replace("{{CODEX_HOME}}", $codexHome)
             $block = "<!-- CODEX-TOKEN-MINIMAL START -->`r`n$delegationText`r`n<!-- CODEX-TOKEN-MINIMAL END -->`r`n"
             $agentsContent = $agentsContent.TrimEnd() + "`r`n`r`n" + $block
         }
