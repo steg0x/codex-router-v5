@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+backup/
+switcher.log
+*.bak
+.env
+.DS_Store
+Thumbs.db

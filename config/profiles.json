@@ -1,0 +1,23 @@
+{
+  "openai": {
+    "provider": "openai",
+    "root_model": "gpt-6-luna",
+    "root_reasoning": "medium",
+    "fast_worker_model": "gpt-6-luna",
+    "fast_worker_reasoning": "medium",
+    "strong_worker_model": "gpt-6.2-sol",
+    "strong_worker_reasoning": "medium",
+    "reviewer_model": "gpt-6.2-sol",
+    "reviewer_reasoning": "medium",
+    "auto_max_reasoning": "xhigh",
+    "auto_astra": false,
+    "enable_agents": true,
+    "mid_worker_model": "gpt-6.1-terra",
+    "mid_worker_reasoning": "medium"
+  },
+  "deepseek": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "enable_agents": false
+  }
+}

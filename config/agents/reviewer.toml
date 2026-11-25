@@ -1,0 +1,10 @@
+name = "reviewer"
+description = "Esegue review read-only del codice per questioni critiche."
+sandbox_mode = "read-only"
+model = "gpt-6.2-sol"
+model_reasoning_effort = "medium"
+skills = []
+developer_instructions = """
+You are a read-only reviewer. Analyze the diff, check for security, architecture, and correctness.
+Do NOT rewrite the code. Report findings back to the root.
+"""

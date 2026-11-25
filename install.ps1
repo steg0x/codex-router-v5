@@ -1,0 +1,158 @@
+param(
+    [string]$CodexHome = (Join-Path $env:USERPROFILE ".codex"),
+    [switch]$PolicyOnly,
+    [switch]$NoTelemetry
+)
+
+$ErrorActionPreference = "Stop"
+$repoDir = $PSScriptRoot
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Set-TomlKeyInBlock {
+    param(
+        [string]$BlockText,
+        [string]$Key,
+        [string]$Line
+    )
+    $pattern = '(?m)^\s*' + [regex]::Escape($Key) + '\s*=.*$'
+    if ([regex]::IsMatch($BlockText, $pattern)) {
+        return [regex]::Replace($BlockText, $pattern, $Line)
+    }
+    $trimmed = $BlockText.TrimEnd("`r", "`n")
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return $Line + "`r`n"
+    }
+    return $trimmed + "`r`n" + $Line + "`r`n"
+}
+
+function Set-TomlSectionKeys {
+    param(
+        [string]$TomlText,
+        [string]$SectionName,
+        [hashtable]$KeyLines
+    )
+    $pattern = '(?ms)^(\[' + [regex]::Escape($SectionName) + '\]\s*\r?\n)(.*?)(?=^\[|\z)'
+    $m = [regex]::Match($TomlText, $pattern)
+    if ($m.Success) {
+        $header = $m.Groups[1].Value
+        $body = $m.Groups[2].Value
+        foreach ($k in $KeyLines.Keys) {
+            $body = Set-TomlKeyInBlock -BlockText $body -Key $k -Line $KeyLines[$k]
+        }
+        $replacement = $header + $body.TrimEnd("`r", "`n") + "`r`n`r`n"
+        return $TomlText.Remove($m.Index, $m.Length).Insert($m.Index, $replacement)
+    }
+    $newSection = "`r`n[" + $SectionName + "]`r`n"
+    foreach ($k in $KeyLines.Keys) {
+        $newSection += $KeyLines[$k] + "`r`n"
+    }
+    return $TomlText.TrimEnd("`r", "`n") + "`r`n" + $newSection
+}
+
+# 1. Ensure Codex directories exist
+if (-not (Test-Path $CodexHome)) {
+    New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
+}
+$agentsDir = Join-Path $CodexHome "agents"
+if (-not (Test-Path $agentsDir)) {
+    New-Item -ItemType Directory -Force -Path $agentsDir | Out-Null
+}
+
+# 2. Install subagent definitions (keep worker and strong-worker dynamic)
+$copiedAgents = @()
+foreach ($agentFile in @("worker.toml", "strong-worker.toml", "reviewer.toml")) {
+    $src = Join-Path $repoDir "config\agents\$agentFile"
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $agentsDir $agentFile) -Force
+        $copiedAgents += $agentFile
+    }
+}
+$legacyRouterToml = Join-Path $agentsDir "router.toml"
+if (Test-Path $legacyRouterToml) {
+    Remove-Item $legacyRouterToml -Force
+}
+
+# 3. Render and install AGENTS.md routing policy block
+$policySrc = Join-Path $repoDir "config\openai-delegation-v5.md"
+if (-not (Test-Path $policySrc)) {
+    throw "Policy template not found: $policySrc"
+}
+$policyText = [System.IO.File]::ReadAllText($policySrc, $utf8NoBom)
+$liveStateDir = (Join-Path $CodexHome "router_v5_live") + "\"
+$policyText = $policyText.Replace("{{ROUTER_DIR}}", $repoDir).Replace("{{CODEX_HOME}}/router_v5_live/", $liveStateDir).Replace("{{CODEX_HOME}}", $CodexHome)
+
+if ($NoTelemetry) {
+    $telemetryIdx = $policyText.IndexOf("## Lightweight telemetry")
+    if ($telemetryIdx -ge 0) {
+        $policyText = $policyText.Substring(0, $telemetryIdx).TrimEnd("`r", "`n", " ", "`t")
+    }
+}
+
+$policyText = $policyText.TrimEnd("`r", "`n")
+$block = "<!-- CODEX-TOKEN-MINIMAL START -->`r`n$policyText`r`n<!-- CODEX-TOKEN-MINIMAL END -->"
+
+$agentsMdPath = Join-Path $CodexHome "AGENTS.md"
+if (Test-Path $agentsMdPath) {
+    $existingAgentsMd = [System.IO.File]::ReadAllText($agentsMdPath, $utf8NoBom)
+} else {
+    $existingAgentsMd = ""
+}
+
+$markerPattern = '(?ms)<!-- CODEX-TOKEN-MINIMAL START -->.*?<!-- CODEX-TOKEN-MINIMAL END -->'
+if ([regex]::IsMatch($existingAgentsMd, $markerPattern)) {
+    $newAgentsMd = [regex]::Replace($existingAgentsMd, $markerPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $block })
+} elseif ([string]::IsNullOrWhiteSpace($existingAgentsMd)) {
+    $newAgentsMd = $block
+} else {
+    $newAgentsMd = $existingAgentsMd.TrimEnd("`r", "`n") + "`r`n`r`n" + $block
+}
+[System.IO.File]::WriteAllText($agentsMdPath, $newAgentsMd.TrimEnd("`r", "`n") + "`r`n", $utf8NoBom)
+
+# 4. Idempotently patch config.toml (unless -PolicyOnly)
+$configPatched = $false
+if (-not $PolicyOnly) {
+    $configPath = Join-Path $CodexHome "config.toml"
+    $existingConfig = ""
+    if (Test-Path $configPath) {
+        Copy-Item $configPath ($configPath + ".bak") -Force
+        $existingConfig = [System.IO.File]::ReadAllText($configPath, $utf8NoBom)
+    }
+
+    $sectionMatch = [regex]::Match($existingConfig, '(?m)^\[')
+    if ($sectionMatch.Success) {
+        $preamble = $existingConfig.Substring(0, $sectionMatch.Index)
+        $rest = $existingConfig.Substring($sectionMatch.Index)
+    } else {
+        $preamble = $existingConfig
+        $rest = ""
+    }
+
+    $preamble = Set-TomlKeyInBlock -BlockText $preamble -Key "model_provider" -Line 'model_provider = "openai"'
+    $preamble = Set-TomlKeyInBlock -BlockText $preamble -Key "model" -Line 'model = "gpt-6-luna"'
+    $preamble = Set-TomlKeyInBlock -BlockText $preamble -Key "model_reasoning_effort" -Line 'model_reasoning_effort = "medium"'
+
+    $combined = $preamble.TrimEnd("`r", "`n") + "`r`n`r`n" + $rest.TrimStart("`r", "`n")
+    if ([string]::IsNullOrWhiteSpace($rest)) {
+        $combined = $preamble.TrimEnd("`r", "`n") + "`r`n"
+    }
+
+    $combined = Set-TomlSectionKeys -TomlText $combined -SectionName "features" -KeyLines @{
+        "multi_agent" = "multi_agent = true"
+    }
+    $combined = Set-TomlSectionKeys -TomlText $combined -SectionName "agents" -KeyLines @{
+        "default_subagent_model" = 'default_subagent_model = "gpt-6-luna"'
+        "default_subagent_reasoning_effort" = 'default_subagent_reasoning_effort = "medium"'
+    }
+
+    [System.IO.File]::WriteAllText($configPath, $combined.TrimStart("`r", "`n").TrimEnd("`r", "`n") + "`r`n", $utf8NoBom)
+    $configPatched = $true
+}
+
+Write-Host ""
+Write-Host "Codex Router V5.1 installato con successo!" -ForegroundColor Green
+Write-Host "  Codex Home   : $CodexHome" -ForegroundColor Cyan
+Write-Host "  Sub-agenti   : $($copiedAgents -join ', ')" -ForegroundColor Cyan
+Write-Host "  AGENTS.md    : aggiornato ($(if ($NoTelemetry) { 'senza telemetria' } else { 'con telemetria' }))" -ForegroundColor Cyan
+Write-Host "  config.toml  : $(if ($configPatched) { 'aggiornato (backup .bak salvato se preesistente)' } else { 'saltato (-PolicyOnly)' })" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Prossimo passo: riavvia Codex e apri una NUOVA chat (consigliato: permessi 'Accesso completo')." -ForegroundColor Yellow
